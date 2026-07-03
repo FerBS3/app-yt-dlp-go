@@ -31,6 +31,8 @@ type QualityPreset struct {
 	AudioOnly bool
 }
 
+const AppName = "DLP Go"
+
 var qualityPresets = []QualityPreset{
 	{Label: "Mejor calidad (1080p)", Format: "bestvideo[height<=1080]+bestaudio/best[height<=1080]"},
 	{Label: "720p", Format: "bestvideo[height<=720]+bestaudio/best[height<=720]"},

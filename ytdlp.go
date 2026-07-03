@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -46,6 +45,7 @@ func startDownload(ctx context.Context, url, outputDir string, preset QualityPre
 			}
 		}
 
+		args = append(args, "--print", "after_move:filepath")
 		args = append(args, url)
 
 		cmd := exec.CommandContext(ctx, ytDlpBin, args...)
@@ -91,10 +91,17 @@ func startDownload(ctx context.Context, url, outputDir string, preset QualityPre
 				}
 			}()
 
+			var lastOutputPath string
 			stdoutDone := make(chan struct{})
 			go func() {
 				defer close(stdoutDone)
-				io.Copy(io.Discard, stdout)
+				scanner := bufio.NewScanner(stdout)
+				for scanner.Scan() {
+					line := strings.TrimSpace(scanner.Text())
+					if line != "" {
+						lastOutputPath = line
+					}
+				}
 			}()
 
 			err := cmd.Wait()
@@ -120,7 +127,7 @@ func startDownload(ctx context.Context, url, outputDir string, preset QualityPre
 				}
 			} else {
 				select {
-				case ch <- downloadDoneMsg{Success: true}:
+				case ch <- downloadDoneMsg{Success: true, FilePath: lastOutputPath}:
 				case <-ctx.Done():
 				}
 			}
