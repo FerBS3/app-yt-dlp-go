@@ -30,10 +30,6 @@ func startDownload(ctx context.Context, url, outputDir string, preset QualityPre
 			"-o", filepath.Join(outputDir, "%(title)s.%(ext)s"),
 		}
 
-		if preset.AudioOnly {
-			args = append(args, "-x", "--audio-format", "mp3", "--audio-quality", "0")
-		}
-
 		args = append(args, url)
 
 		cmd := exec.CommandContext(ctx, ytDlpBin, args...)

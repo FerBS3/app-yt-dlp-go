@@ -34,8 +34,10 @@ var qualityPresets = []QualityPreset{
 	{Label: "Mejor calidad (1080p)", Format: "bestvideo[height<=1080]+bestaudio/best[height<=1080]"},
 	{Label: "720p", Format: "bestvideo[height<=720]+bestaudio/best[height<=720]"},
 	{Label: "480p", Format: "bestvideo[height<=480]+bestaudio/best[height<=480]"},
-	{Label: "Solo audio (MP3)", Format: "bestaudio/best", AudioOnly: true},
-	{Label: "Mejor calidad disponible", Format: "bestvideo+bestaudio/best"},
+	{Label: "Mejor calidad", Format: "bestvideo+bestaudio/best"},
+	{Label: "Audio AAC (m4a)", Format: "bestaudio[ext=m4a]/bestaudio", AudioOnly: true},
+	{Label: "Audio Opus", Format: "bestaudio[ext=opus]/bestaudio", AudioOnly: true},
+	{Label: "Mejor audio", Format: "bestaudio/best", AudioOnly: true},
 }
 
 var ytDlpBin string

@@ -1,0 +1,34 @@
+# Binario compilado de la aplicacion
+yt-dlp-go-prueba
+yt-dlp-go-prueba.exe
+
+# Releases empaquetadas
+release/
+
+# Directorios de yt-dlp (binarios descargados y configuracion)
+yt-dlp/
+
+# Videos descargados
+Descargas/
+
+# Archivos objeto de Go
+*.o
+*.a
+
+# Archivos de prueba
+*.test
+*.test.exe
+
+# Archivos de perfil de Go
+*.out
+*.prof
+*.trace
+*.cov
+*.count
+
+# Archivos de dependencias descargadas
+vendor/
+
+# Archivos de compilacion temporal
+/tmp
+/build

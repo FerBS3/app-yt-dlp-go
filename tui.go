@@ -484,7 +484,17 @@ func (m model) selectView() string {
 	)
 
 	var items []string
+	firstAudio := -1
 	for i, q := range qualityPresets {
+		if q.AudioOnly && firstAudio == -1 {
+			firstAudio = i
+		}
+	}
+	for i, q := range qualityPresets {
+		if i == firstAudio {
+			items = append(items, "")
+			items = append(items, subtitleStyle.Render("Audio sin conversión:"))
+		}
 		if i == m.qualityIndex {
 			items = append(items, selectedStyle.Render("▸ "+q.Label))
 		} else {
