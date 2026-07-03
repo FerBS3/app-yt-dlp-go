@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -25,9 +24,13 @@ func startDownload(ctx context.Context, url, outputDir string, preset QualityPre
 		args := []string{
 			"--newline",
 			"--progress-template",
-			`json:{"percent":"%(progress.percent)s","speed":"%(progress.speed)s","eta":"%(progress.eta)s"}`,
+			`{"percent":"%(progress.percent)s","speed":"%(progress.speed)s","eta":"%(progress.eta)s"}`,
 			"-f", preset.Format,
 			"-o", filepath.Join(outputDir, "%(title)s.%(ext)s"),
+		}
+
+		if !preset.AudioOnly && ffmpegAvailable() {
+			args = append(args, "--merge-output-format", "mp4")
 		}
 
 		args = append(args, url)
@@ -51,26 +54,20 @@ func startDownload(ctx context.Context, url, outputDir string, preset QualityPre
 		go func() {
 			defer close(ch)
 
-			var wg sync.WaitGroup
-
-			wg.Add(1)
+			stdoutDone := make(chan struct{})
 			go func() {
-				defer wg.Done()
+				defer close(stdoutDone)
 				scanner := bufio.NewScanner(stdout)
 				for scanner.Scan() {
 					line := strings.TrimSpace(scanner.Text())
-					if !strings.HasPrefix(line, "{") {
-						continue
-					}
 					var p progressData
-					if json.Unmarshal([]byte(line), &p) != nil || p.Percent == "" {
+					if json.Unmarshal([]byte(line), &p) != nil {
 						continue
 					}
 					percent := 0.0
-					if n, _ := fmt.Sscanf(strings.TrimSuffix(p.Percent, "%"), "%f", &percent); n != 1 {
-						continue
+					if p.Percent != "" {
+						fmt.Sscanf(strings.TrimSuffix(p.Percent, "%"), "%f", &percent)
 					}
-
 					select {
 					case ch <- progressMsg{Percent: percent, Speed: p.Speed, ETA: p.ETA}:
 					case <-ctx.Done():
@@ -79,46 +76,40 @@ func startDownload(ctx context.Context, url, outputDir string, preset QualityPre
 				}
 			}()
 
-			wg.Add(1)
+			var errBuf strings.Builder
+			stderrDone := make(chan struct{})
 			go func() {
-				defer wg.Done()
-
-				var stderrBuf strings.Builder
-				stderrDone := make(chan struct{}, 1)
-				go func() {
-					io.Copy(&stderrBuf, stderr)
-					close(stderrDone)
-				}()
-
-				err := cmd.Wait()
-				<-stderrDone
-
-				if ctx.Err() != nil {
-					select {
-					case ch <- downloadDoneMsg{Cancelled: true}:
-					case <-ctx.Done():
-					}
-					return
-				}
-
-				if err != nil {
-					errMsg := strings.TrimSpace(stderrBuf.String())
-					if errMsg == "" {
-						errMsg = fmt.Sprintf("yt-dlp falló (código %d)", cmd.ProcessState.ExitCode())
-					}
-					select {
-					case ch <- downloadDoneMsg{Err: fmt.Errorf("%s", errMsg)}:
-					case <-ctx.Done():
-					}
-				} else {
-					select {
-					case ch <- downloadDoneMsg{Success: true}:
-					case <-ctx.Done():
-					}
-				}
+				defer close(stderrDone)
+				io.Copy(&errBuf, stderr)
 			}()
 
-			wg.Wait()
+			err := cmd.Wait()
+			<-stdoutDone
+			<-stderrDone
+
+			if ctx.Err() != nil {
+				select {
+				case ch <- downloadDoneMsg{Cancelled: true}:
+				case <-ctx.Done():
+				}
+				return
+			}
+
+			if err != nil {
+				errMsg := strings.TrimSpace(errBuf.String())
+				if errMsg == "" {
+					errMsg = fmt.Sprintf("yt-dlp falló (código %d)", cmd.ProcessState.ExitCode())
+				}
+				select {
+				case ch <- downloadDoneMsg{Err: fmt.Errorf("%s", errMsg)}:
+				case <-ctx.Done():
+				}
+			} else {
+				select {
+				case ch <- downloadDoneMsg{Success: true}:
+				case <-ctx.Done():
+				}
+			}
 		}()
 
 		return downloadStartedMsg{ch: ch}
