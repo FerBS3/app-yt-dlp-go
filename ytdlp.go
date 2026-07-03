@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -21,16 +22,28 @@ func startDownload(ctx context.Context, url, outputDir string, preset QualityPre
 
 		ch := make(chan tea.Msg, 100)
 
+		format := preset.Format
+		if !preset.AudioOnly && !ffmpegAvailable() {
+			if idx := strings.LastIndex(format, "/"); idx >= 0 {
+				format = format[idx+1:]
+			}
+		}
+
 		args := []string{
 			"--newline",
 			"--progress-template",
-			`json:{"percent":"%(progress.percent)s","speed":"%(progress.speed)s","eta":"%(progress.eta)s"}`,
-			"-f", preset.Format,
+			`{"percent":"%(progress.percent)s","speed":"%(progress.speed)s","eta":"%(progress.eta)s"}`,
+			"-f", format,
 			"-o", filepath.Join(outputDir, "%(title)s.%(ext)s"),
 		}
 
-		if !preset.AudioOnly && ffmpegAvailable() {
-			args = append(args, "--merge-output-format", "mp4")
+		if !preset.AudioOnly {
+			if _, err := exec.LookPath("ffmpeg"); err == nil {
+				args = append(args, "--merge-output-format", "mp4")
+			} else if _, err := os.Stat(getFfmpegPath()); err == nil {
+				args = append(args, "--merge-output-format", "mp4")
+				args = append(args, "--ffmpeg-location", getFfmpegDir())
+			}
 		}
 
 		args = append(args, url)
