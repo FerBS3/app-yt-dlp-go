@@ -123,6 +123,12 @@ type model struct {
 	updateCurrentVersion string
 	updateLatestVersion  string
 	updateVersionMsg     string
+	ytDlpVersion        string
+
+	downloadLabel  string
+	ffmpegVersion  string
+	ffmpegStatus   string
+	ffmpegStatusMsg string
 }
 
 func initialModel() model {
@@ -180,6 +186,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "c", "C":
 			if m.state == inputState || m.state == doneState {
 				m.selectedSource = selectedSource
+				m.ytDlpVersion, _ = getYtDlpVersion(getYtDlpPath(selectedSource))
+				m.ffmpegVersion, m.ffmpegStatus = checkFfmpegStatus()
+				m.ffmpegStatusMsg = ""
+				m.updateVersionMsg = ""
 				m.state = settingsState
 				return m, nil
 			}
@@ -223,11 +233,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Batch(checkForUpdatesCmd(), m.spinner.Tick)
 			}
 
-		case "d", "D":
-			if m.state == settingsState && m.updateVersionMsg != "" && strings.HasPrefix(m.updateVersionMsg, "Actualización disponible") {
-				m.state = updatingState
-				binPath := getYtDlpPath(m.selectedSource)
-				return m, tea.Batch(performUpdateCmd(binPath), m.spinner.Tick)
+		case "f", "F":
+			if m.state == settingsState {
+				m.state = downloadingBinState
+				m.downloadLabel = "ffmpeg"
+				return m, tea.Batch(downloadFfmpegCmd(), m.spinner.Tick)
 			}
 
 		case "enter":
@@ -298,6 +308,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case ytDlpNeededMsg:
 		m.state = downloadingBinState
+		m.downloadLabel = "yt-dlp " + msg.source
 		return m, tea.Batch(downloadYtDlp(msg.targetPath, msg.source), m.spinner.Tick)
 
 	case videoInfoMsg:
@@ -343,7 +354,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case spinner.TickMsg:
-		if m.state == loadingState || m.state == checkingState || m.state == downloadingBinState || m.state == checkingUpdateState || m.state == updatingState {
+		if m.state == loadingState || m.state == checkingState || m.state == downloadingBinState || m.state == checkingUpdateState || m.state == updatingState || m.state == downloadingState {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			return m, cmd
@@ -361,17 +372,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case updateCheckResultMsg:
 		m.selectedSource = selectedSource
-		m.state = settingsState
 		if msg.err != nil {
+			m.state = settingsState
 			m.updateVersionMsg = errorStyle.Render("Error: " + msg.err.Error())
-		} else if msg.currentVersion == "" {
-			m.updateVersionMsg = "Versión actual: no instalado\nVersión más reciente: " + msg.latestVersion +
-				"\n\nPresiona D para descargar la última versión"
 		} else if msg.currentVersion != msg.latestVersion {
-			m.updateVersionMsg = fmt.Sprintf("Versión actual: %s\nVersión más reciente: %s\n\nPresiona D para actualizar",
-				msg.currentVersion, msg.latestVersion)
+			m.state = updatingState
+			binPath := getYtDlpPath(m.selectedSource)
+			return m, tea.Batch(performUpdateCmd(binPath), m.spinner.Tick)
 		} else {
-			m.updateVersionMsg = fmt.Sprintf("Ya tenés la versión más reciente (%s) ✓", msg.currentVersion)
+			m.state = settingsState
+			if msg.currentVersion == "" {
+				m.updateVersionMsg = "No instalado. Versión más reciente: " + msg.latestVersion
+			} else {
+				m.updateVersionMsg = "Ya tenés la versión más reciente (" + msg.currentVersion + ") ✓"
+			}
 		}
 		return m, nil
 
@@ -386,6 +400,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				m.updateVersionMsg = successStyle.Render("Actualización completada ✓")
 			}
+		}
+		return m, nil
+
+	case ffmpegDownloadedMsg:
+		m.state = settingsState
+		if msg.Err != nil {
+			m.ffmpegStatusMsg = errorStyle.Render("Error: " + msg.Err.Error())
+		} else {
+			m.ffmpegVersion = msg.Version
+			m.ffmpegStatus = "estático"
+			m.ffmpegStatusMsg = successStyle.Render("ffmpeg instalado ✓")
 		}
 		return m, nil
 	}
@@ -434,12 +459,16 @@ func (m model) checkingView() string {
 }
 
 func (m model) downloadingBinView() string {
+	label := m.downloadLabel
+	if label == "" {
+		label = "yt-dlp " + m.selectedSource
+	}
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("yt-dlp-go-prueba"))
 	b.WriteString("\n\n")
 	b.WriteString(borderStyle.Render(
 		lipgloss.JoinVertical(lipgloss.Center,
-			m.spinner.View()+" Descargando yt-dlp "+m.selectedSource+"...",
+			m.spinner.View()+" Descargando "+label+"...",
 		),
 	))
 	b.WriteString("\n")
@@ -610,19 +639,27 @@ func (m model) settingsView() string {
 	lines = append(lines, "  "+stableRadio+selectedStyle.Render("1. Stable"))
 	lines = append(lines, "  "+nightlyRadio+selectedStyle.Render("2. Nightly"))
 	lines = append(lines, "")
-	lines = append(lines, settingsLabelStyle.Render("Versión:"))
+	lines = append(lines, settingsLabelStyle.Render("yt-dlp:"))
 	if m.updateVersionMsg != "" {
 		lines = append(lines, "  "+m.updateVersionMsg)
 	} else {
-		ver, _ := getYtDlpVersion(getYtDlpPath(m.selectedSource))
-		if ver != "" {
-			lines = append(lines, "  "+ver)
+		if m.ytDlpVersion != "" {
+			lines = append(lines, "  "+m.ytDlpVersion)
 		} else {
 			lines = append(lines, "  No instalado")
 		}
 	}
 	lines = append(lines, "")
-	lines = append(lines, hintStyle.Render("1/2: fuente  ·  U: buscar actualizaciones  ·  D: descargar/actualizar"))
+	lines = append(lines, settingsLabelStyle.Render("ffmpeg:"))
+	if m.ffmpegStatusMsg != "" {
+		lines = append(lines, "  "+m.ffmpegStatusMsg)
+	} else if m.ffmpegVersion != "" {
+		lines = append(lines, "  "+m.ffmpegVersion+" ("+m.ffmpegStatus+")")
+	} else {
+		lines = append(lines, "  No encontrado")
+	}
+	lines = append(lines, "")
+	lines = append(lines, hintStyle.Render("1/2: fuente  ·  U: actualizar yt-dlp  ·  F: descargar ffmpeg"))
 	lines = append(lines, hintStyle.Render("C o Esc: volver  ·  Ctrl+C: salir"))
 
 	content := lipgloss.JoinVertical(lipgloss.Center, lines...)
