@@ -98,9 +98,6 @@ var (
 	versionStyle = lipgloss.NewStyle().
 			Foreground(orange)
 
-	logoStyle = lipgloss.NewStyle().
-			Foreground(purple).
-			Bold(true)
 )
 
 type etaTickMsg struct{}
@@ -475,10 +472,7 @@ func (m model) View() string {
 }
 
 func appHeader() string {
-	logo := logoStyle.Render("╔═══╗ ╔═══╗ ╔═══╗") + "\n" +
-		logoStyle.Render("║ D ║ ║ L ║ ║ P ║   Go") + "\n" +
-		logoStyle.Render("╚═══╝ ╚═══╝ ╚═══╝")
-	return lipgloss.JoinVertical(lipgloss.Center, logo)
+	return titleStyle.Render(AppName)
 }
 
 func (m model) checkingView() string {
