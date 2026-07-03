@@ -6,6 +6,7 @@ import (
 	"math"
 	"strings"
 
+	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -194,6 +195,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.selectedSource = selectedSource
 				m.state = inputState
 				return m, nil
+			}
+
+		case "p", "P":
+			if m.state == inputState {
+				text, err := clipboard.ReadAll()
+				if err == nil && text != "" {
+					m.textInput.SetValue(text)
+				}
 			}
 
 		case "1":
@@ -453,7 +462,7 @@ func (m model) inputView() string {
 			"",
 			m.textInput.View(),
 			"",
-			hintStyle.Render("Enter para analizar  ·  C para configurar  ·  Ctrl+C para salir"),
+			hintStyle.Render("Enter para analizar  ·  P para pegar  ·  C para configurar  ·  Ctrl+C para salir"),
 		),
 	))
 	b.WriteString("\n")
