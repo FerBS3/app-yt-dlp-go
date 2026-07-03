@@ -6,6 +6,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/progress"
@@ -98,6 +99,8 @@ var (
 			Foreground(orange)
 )
 
+type etaTickMsg struct{}
+
 type model struct {
 	state    state
 	width    int
@@ -108,9 +111,10 @@ type model struct {
 	progress  progress.Model
 
 	qualityIndex int
-	dlPercent    float64
-	dlSpeed      string
-	dlETA        string
+	dlPercent     float64
+	dlSpeed       string
+	dlETA         string
+	dlETAEndTime  time.Time
 
 	dlChan   chan tea.Msg
 	dlCancel context.CancelFunc
@@ -235,7 +239,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "f", "F":
-			if m.state == settingsState {
+			if m.state == settingsState && m.ffmpegStatus != "sistema" {
 				m.state = downloadingBinState
 				m.downloadLabel = "ffmpeg"
 				return m, tea.Batch(downloadFfmpegCmd(), m.spinner.Tick)
@@ -330,7 +334,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.dlPercent = msg.Percent
 		m.dlSpeed = msg.Speed
 		m.dlETA = msg.ETA
-		return m, listenDownload(m.dlChan)
+		if msg.ETA != "" && msg.ETA != "NA" {
+			if s, err := strconv.Atoi(msg.ETA); err == nil {
+				m.dlETAEndTime = time.Now().Add(time.Duration(s) * time.Second)
+			}
+		} else {
+			m.dlETAEndTime = time.Time{}
+		}
+		return m, tea.Batch(listenDownload(m.dlChan), tickSecond())
 
 	case downloadDoneMsg:
 		if m.dlCancel != nil {
@@ -346,6 +357,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.successMsg = "Descarga completada ✓"
 			m.err = nil
+		}
+		return m, nil
+
+	case etaTickMsg:
+		if m.state == downloadingState && !m.dlETAEndTime.IsZero() {
+			return m, tickSecond()
 		}
 		return m, nil
 
@@ -565,8 +582,11 @@ func (m model) downloadingView() string {
 	if m.dlSpeed != "" {
 		info += progressInfoStyle.Render("Vel: "+formatSpeed(m.dlSpeed)) + "  "
 	}
-	if m.dlETA != "" {
-		info += progressInfoStyle.Render("ETA: "+m.dlETA+"s")
+	if !m.dlETAEndTime.IsZero() {
+		remaining := time.Until(m.dlETAEndTime)
+		if remaining > 0 {
+			info += progressInfoStyle.Render("ETA: " + formatDuration(int(remaining.Seconds())))
+		}
 	}
 
 	var content string
@@ -673,7 +693,11 @@ func (m model) settingsView() string {
 		lines = append(lines, "  No encontrado")
 	}
 	lines = append(lines, "")
-	lines = append(lines, hintStyle.Render("1/2: fuente  ·  U: actualizar yt-dlp  ·  F: descargar ffmpeg"))
+	hints := "1/2: fuente  ·  U: actualizar yt-dlp"
+	if m.ffmpegStatus != "sistema" {
+		hints += "  ·  F: descargar ffmpeg"
+	}
+	lines = append(lines, hintStyle.Render(hints))
 	lines = append(lines, hintStyle.Render("C o Esc: volver  ·  Ctrl+C: salir"))
 
 	content := lipgloss.JoinVertical(lipgloss.Center, lines...)
@@ -728,6 +752,12 @@ func formatSpeed(s string) string {
 	default:
 		return fmt.Sprintf("%.0f B/s", v)
 	}
+}
+
+func tickSecond() tea.Cmd {
+	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
+		return etaTickMsg{}
+	})
 }
 
 func formatDuration(seconds int) string {
