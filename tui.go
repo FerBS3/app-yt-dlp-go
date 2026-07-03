@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 
 	"github.com/atotto/clipboard"
@@ -560,26 +561,39 @@ func (m model) selectView() string {
 }
 
 func (m model) downloadingView() string {
-	bar := m.progress.ViewAs(m.dlPercent / 100)
-	pct := progressPercentStyle.Render(fmt.Sprintf("%.1f%%", m.dlPercent))
 	info := ""
 	if m.dlSpeed != "" {
-		info += progressInfoStyle.Render("Vel: "+m.dlSpeed) + "  "
+		info += progressInfoStyle.Render("Vel: "+formatSpeed(m.dlSpeed)) + "  "
 	}
 	if m.dlETA != "" {
 		info += progressInfoStyle.Render("ETA: "+m.dlETA+"s")
 	}
 
-	content := lipgloss.JoinVertical(lipgloss.Center,
-		"Descargando...",
-		"",
-		bar,
-		pct,
-		"",
-		info,
-		"",
-		hintStyle.Render("Ctrl+C para cancelar"),
-	)
+	var content string
+	if m.dlPercent > 0 {
+		bar := m.progress.ViewAs(m.dlPercent / 100)
+		pct := progressPercentStyle.Render(fmt.Sprintf("%.1f%%", m.dlPercent))
+		content = lipgloss.JoinVertical(lipgloss.Center,
+			"Descargando...",
+			"",
+			bar,
+			pct,
+			"",
+			info,
+			"",
+			hintStyle.Render("Ctrl+C para cancelar"),
+		)
+	} else {
+		content = lipgloss.JoinVertical(lipgloss.Center,
+			"Descargando...",
+			"",
+			m.spinner.View(),
+			"",
+			info,
+			"",
+			hintStyle.Render("Ctrl+C para cancelar"),
+		)
+	}
 
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("yt-dlp-go-prueba"))
@@ -694,6 +708,26 @@ func (m model) updatingView() string {
 	))
 	b.WriteString("\n")
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, b.String())
+}
+
+func formatSpeed(s string) string {
+	if s == "" {
+		return ""
+	}
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return s
+	}
+	switch {
+	case v >= 1<<30:
+		return fmt.Sprintf("%.1f GiB/s", v/(1<<30))
+	case v >= 1<<20:
+		return fmt.Sprintf("%.1f MiB/s", v/(1<<20))
+	case v >= 1<<10:
+		return fmt.Sprintf("%.1f KiB/s", v/(1<<10))
+	default:
+		return fmt.Sprintf("%.0f B/s", v)
+	}
 }
 
 func formatDuration(seconds int) string {
