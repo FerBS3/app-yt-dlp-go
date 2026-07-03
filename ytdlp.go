@@ -54,38 +54,39 @@ func startDownload(ctx context.Context, url, outputDir string, preset QualityPre
 		go func() {
 			defer close(ch)
 
-			stdoutDone := make(chan struct{})
-			go func() {
-				defer close(stdoutDone)
-				scanner := bufio.NewScanner(stdout)
-				for scanner.Scan() {
-					line := strings.TrimSpace(scanner.Text())
-					var p progressData
-					if json.Unmarshal([]byte(line), &p) != nil {
-						continue
-					}
-					percent := 0.0
-					if p.Percent != "" {
-						fmt.Sscanf(strings.TrimSuffix(p.Percent, "%"), "%f", &percent)
-					}
-					select {
-					case ch <- progressMsg{Percent: percent, Speed: p.Speed, ETA: p.ETA}:
-					case <-ctx.Done():
-						return
-					}
-				}
-			}()
-
 			var errBuf strings.Builder
 			stderrDone := make(chan struct{})
 			go func() {
 				defer close(stderrDone)
-				io.Copy(&errBuf, stderr)
+				scanner := bufio.NewScanner(stderr)
+				for scanner.Scan() {
+					line := strings.TrimSpace(scanner.Text())
+					var p progressData
+					if json.Unmarshal([]byte(line), &p) == nil {
+						percent := 0.0
+						if p.Percent != "" {
+							fmt.Sscanf(strings.TrimSuffix(p.Percent, "%"), "%f", &percent)
+						}
+						select {
+						case ch <- progressMsg{Percent: percent, Speed: p.Speed, ETA: p.ETA}:
+						case <-ctx.Done():
+							return
+						}
+						continue
+					}
+					errBuf.WriteString(line + "\n")
+				}
+			}()
+
+			stdoutDone := make(chan struct{})
+			go func() {
+				defer close(stdoutDone)
+				io.Copy(io.Discard, stdout)
 			}()
 
 			err := cmd.Wait()
-			<-stdoutDone
 			<-stderrDone
+			<-stdoutDone
 
 			if ctx.Err() != nil {
 				select {
