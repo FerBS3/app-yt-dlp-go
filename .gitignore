@@ -8,6 +8,11 @@ release/
 # Directorios de yt-dlp (binarios descargados y configuracion)
 yt-dlp/
 
+# Binarios estaticos descargados (yt-dlp, ffmpeg)
+yt-dlp/nightly/
+yt-dlp/stable/
+yt-dlp/ffmpeg/
+
 # Videos descargados
 Descargas/
 
