@@ -1,6 +1,7 @@
 package main
 
 import (
+	"archive/zip"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -270,6 +271,7 @@ func ensureAppDirs() error {
 		getYtDlpDir(),
 		filepath.Dir(getYtDlpPath("nightly")),
 		filepath.Dir(getYtDlpPath("stable")),
+		getFfmpegDir(),
 	}
 	for _, d := range dirs {
 		if err := os.MkdirAll(d, 0755); err != nil {
@@ -343,4 +345,180 @@ func performUpdateCmd(targetPath string) tea.Cmd {
 		ytDlpBin = targetPath
 		return updateCompletedMsg{}
 	}
+}
+
+func getFfmpegDir() string {
+	return filepath.Join(getYtDlpDir(), "ffmpeg")
+}
+
+func getFfmpegPath() string {
+	name := "ffmpeg"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	return filepath.Join(getFfmpegDir(), name)
+}
+
+func getFfmpegDownloadURL() string {
+	if runtime.GOOS == "windows" {
+		return "https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-win64-gpl.zip"
+	}
+	return "https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-linux64-gpl.tar.xz"
+}
+
+type ffmpegDownloadedMsg struct {
+	Version string
+	Err     error
+}
+
+func downloadFfmpegCmd() tea.Cmd {
+	return func() tea.Msg {
+		dest := getFfmpegPath()
+		os.MkdirAll(filepath.Dir(dest), 0755)
+
+		archive, err := os.CreateTemp("", "ffmpeg-*")
+		if err != nil {
+			return ffmpegDownloadedMsg{Err: fmt.Errorf("no se pudo crear temporal: %w", err)}
+		}
+		tmpPath := archive.Name()
+		archive.Close()
+		defer os.Remove(tmpPath)
+
+		url := getFfmpegDownloadURL()
+		if err := downloadFile(url, tmpPath); err != nil {
+			return ffmpegDownloadedMsg{Err: err}
+		}
+
+		if runtime.GOOS == "windows" {
+			err = extractFfmpegZip(tmpPath, dest)
+		} else {
+			err = extractFfmpegTarXz(tmpPath, dest)
+		}
+		if err != nil {
+			return ffmpegDownloadedMsg{Err: err}
+		}
+
+		ver := getFfmpegVersion(dest)
+		return ffmpegDownloadedMsg{Version: ver}
+	}
+}
+
+func extractFfmpegTarXz(archive, dest string) error {
+	tmpDir, err := os.MkdirTemp("", "ffmpeg-extract")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cmd := exec.Command("tar", "-xJf", archive, "-C", tmpDir)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("error al extraer: %s", string(out))
+	}
+
+	var src string
+	filepath.Walk(tmpDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() && info.Mode().IsRegular() && filepath.Base(path) == "ffmpeg" {
+			src = path
+			return filepath.SkipAll
+		}
+		return nil
+	})
+
+	if src == "" {
+		return fmt.Errorf("no se encontró ffmpeg en el archivo")
+	}
+
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	out, err := os.Create(dest)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
+
+	return os.Chmod(dest, 0755)
+}
+
+func extractFfmpegZip(archive, dest string) error {
+	r, err := zip.OpenReader(archive)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+
+	for _, f := range r.File {
+		if !f.FileInfo().IsDir() && strings.HasSuffix(f.Name, "ffmpeg.exe") {
+			rc, err := f.Open()
+			if err != nil {
+				return err
+			}
+			defer rc.Close()
+
+			out, err := os.Create(dest)
+			if err != nil {
+				return err
+			}
+			defer out.Close()
+
+			_, err = io.Copy(out, rc)
+			return err
+		}
+	}
+
+	return fmt.Errorf("no se encontró ffmpeg.exe en el archivo")
+}
+
+func getFfmpegVersion(binPath string) string {
+	cmd := exec.Command(binPath, "-version")
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	lines := strings.SplitN(string(out), "\n", 2)
+	if len(lines) > 0 {
+		return strings.TrimSpace(lines[0])
+	}
+	return ""
+}
+
+func ffmpegAvailable() bool {
+	if _, err := exec.LookPath("ffmpeg"); err == nil {
+		return true
+	}
+	if _, err := os.Stat(getFfmpegPath()); err == nil {
+		return true
+	}
+	return false
+}
+
+func checkFfmpegStatus() (string, string) {
+	if path, err := exec.LookPath("ffmpeg"); err == nil {
+		ver := getFfmpegVersion(path)
+		if ver != "" {
+			return ver, "sistema"
+		}
+		return "ffmpeg (en PATH)", "sistema"
+	}
+
+	localPath := getFfmpegPath()
+	if _, err := os.Stat(localPath); err == nil {
+		ver := getFfmpegVersion(localPath)
+		if ver != "" {
+			return ver, "estático"
+		}
+		return "ffmpeg (local)", "estático"
+	}
+
+	return "", ""
 }
