@@ -21,13 +21,14 @@ func startDownload(ctx context.Context, url, outputDir string, preset QualityPre
 
 		ch := make(chan tea.Msg, 100)
 
-		args := []string{
-			"--newline",
-			"--progress-template",
-			`{"percent":"%(progress.percent)s","speed":"%(progress.speed)s","eta":"%(progress.eta)s"}`,
-			"-f", preset.Format,
-			"-o", filepath.Join(outputDir, "%(title)s.%(ext)s"),
-		}
+	args := []string{
+		"--newline",
+		"--progress-template",
+		`{"percent":"%(progress.percent)s","speed":"%(progress.speed)s","eta":"%(progress.eta)s"}`,
+		"--extractor-args", "youtube:skip=webpage",
+		"-f", preset.Format,
+		"-o", filepath.Join(outputDir, "%(title)s.%(ext)s"),
+	}
 
 		if !preset.AudioOnly && ffmpegAvailable() {
 			args = append(args, "--merge-output-format", "mp4")
