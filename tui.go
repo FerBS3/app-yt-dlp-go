@@ -224,6 +224,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if err == nil && text != "" {
 					m.textInput.SetValue(text)
 				}
+				return m, nil
 			}
 
 		case "1":
