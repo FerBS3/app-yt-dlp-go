@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-APP="yt-dlp-go-prueba"
+APP="DLP-Go"
 OUTDIR="release"
 
 echo "=== Validando código ==="

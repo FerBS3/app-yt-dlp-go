@@ -1,4 +1,4 @@
-# yt-dlp-go-prueba
+# DLP-Go
 
 ## Goal
 Build a Go CLI TUI app using Bubble Tea that auto-manages yt-dlp (stable/nightly), lets the user paste a URL, select quality presets, download videos with progress, and check for yt-dlp updates.
@@ -37,9 +37,9 @@ Build a Go CLI TUI app using Bubble Tea that auto-manages yt-dlp (stable/nightly
 
 ## Commands
 - `go run .` — run in dev
-- `go build -o yt-dlp-go-prueba .` — build binary
+- `go build -o DLP-Go .` — build binary
 - `go vet ./...` — lint
-- `GOOS=windows GOARCH=amd64 go build -o yt-dlp-go-prueba.exe .` — cross-compile Windows
+- `GOOS=windows GOARCH=amd64 go build -o DLP-Go.exe .` — cross-compile Windows
 
 ## Key Bindings
 - `Enter` — confirm/continue

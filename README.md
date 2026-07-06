@@ -57,7 +57,7 @@ go run .
 ### Compilar binario para Linux
 
 ```bash
-go build -o yt-dlp-go-prueba .
+go build -o DLP-Go .
 ```
 
 ### Compilar con optimizaciones y generar release
@@ -80,7 +80,7 @@ go vet ./...
 ### Compilacion cruzada para Windows
 
 ```bash
-GOOS=windows GOARCH=amd64 go build -o yt-dlp-go-prueba.exe .
+GOOS=windows GOARCH=amd64 go build -o DLP-Go.exe .
 ```
 
 ---
@@ -143,7 +143,7 @@ Los presets de video y audio se muestran separados visualmente en la lista de se
 ## Estructura de directorios
 
 ```
-yt-dlp-go-prueba/
+DLP-Go/
   |-- main.go               Punto de entrada de la aplicacion
   |-- tui.go                Modelo Bubble Tea, vistas y estilos
   |-- ytdlp_types.go        Tipos, configuracion, GitHub API, descargas
@@ -187,7 +187,7 @@ El binario principal de la app se encuentra en la raiz del proyecto.
 Para compilar para Windows desde Linux:
 
 ```bash
-GOOS=windows GOARCH=amd64 go build -o yt-dlp-go-prueba.exe .
+GOOS=windows GOARCH=amd64 go build -o DLP-Go.exe .
 ```
 
 El binario `.exe` funciona de la misma manera: crea los directorios, descarga el binario
