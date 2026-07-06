@@ -26,21 +26,22 @@ type VideoInfo struct {
 }
 
 type QualityPreset struct {
-	Label     string
-	Format    string
-	AudioOnly bool
+	Label       string
+	Format      string
+	AudioOnly   bool
+	Description string
 }
 
 const AppName = "DLP Go"
 
 var qualityPresets = []QualityPreset{
-	{Label: "Mejor calidad (1080p)", Format: "bestvideo[height<=1080]+bestaudio/best[height<=1080]"},
-	{Label: "720p", Format: "bestvideo[height<=720]+bestaudio/best[height<=720]"},
-	{Label: "480p", Format: "bestvideo[height<=480]+bestaudio/best[height<=480]"},
-	{Label: "Mejor calidad", Format: "bestvideo+bestaudio/best"},
-	{Label: "Audio AAC (m4a)", Format: "bestaudio[ext=m4a]/bestaudio", AudioOnly: true},
-	{Label: "Audio Opus", Format: "bestaudio[ext=opus]/bestaudio", AudioOnly: true},
-	{Label: "Mejor audio", Format: "bestaudio/best", AudioOnly: true},
+	{Label: "Mejor calidad (1080p)", Format: "bestvideo[height<=1080]+bestaudio/best[height<=1080]", Description: "Full HD, ideal para pantallas grandes"},
+	{Label: "720p", Format: "bestvideo[height<=720]+bestaudio/best[height<=720]", Description: "HD, buen balance calidad/tamaño"},
+	{Label: "480p", Format: "bestvideo[height<=480]+bestaudio/best[height<=480]", Description: "SD, archivos más livianos"},
+	{Label: "Mejor calidad", Format: "bestvideo+bestaudio/best", Description: "Sin límite de resolución"},
+	{Label: "Audio AAC (m4a)", Format: "bestaudio[ext=m4a]/bestaudio", AudioOnly: true, Description: "AAC 128kbps, compatible con todo"},
+	{Label: "Audio Opus", Format: "bestaudio[ext=opus]/bestaudio", AudioOnly: true, Description: "Opus, mejor calidad/bitrate"},
+	{Label: "Mejor audio", Format: "bestaudio/best", AudioOnly: true, Description: "Audio sin compresión adicional"},
 }
 
 var ytDlpBin string
