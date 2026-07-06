@@ -29,6 +29,7 @@ const (
 	settingsState
 	checkingUpdateState
 	updatingState
+	helpState
 )
 
 var (
@@ -39,7 +40,7 @@ var (
 	gray     = lipgloss.Color("#888888")
 	white    = lipgloss.Color("#EEEEEE")
 	orange   = lipgloss.Color("#FFAA44")
-	darkGray = lipgloss.Color("#444444")
+	darkGray = lipgloss.Color("#999999")
 
 	borderStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
@@ -49,13 +50,11 @@ var (
 	titleStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(purple).
-			Align(lipgloss.Center).
-			Width(60)
+			Align(lipgloss.Center)
 
 	subtitleStyle = lipgloss.NewStyle().
 			Foreground(cyan).
-			Align(lipgloss.Center).
-			Width(60)
+			Align(lipgloss.Center)
 
 	labelStyle = lipgloss.NewStyle().
 			Foreground(gray).
@@ -81,8 +80,7 @@ var (
 
 	hintStyle = lipgloss.NewStyle().
 			Foreground(darkGray).
-			Align(lipgloss.Center).
-			Width(60)
+			Align(lipgloss.Center)
 
 	progressPercentStyle = lipgloss.NewStyle().
 				Foreground(purple).
@@ -123,6 +121,7 @@ type model struct {
 	videoInfo *VideoInfo
 
 	err        error
+	inputError error
 	successMsg string
 	dlFilePath string
 
@@ -132,8 +131,9 @@ type model struct {
 	updateVersionMsg     string
 	ytDlpVersion        string
 
-	downloadLabel  string
-	ffmpegVersion  string
+	downloadLabel      string
+	startupFfmpegCheck bool
+	ffmpegVersion      string
 	ffmpegStatus   string
 	ffmpegStatusMsg string
 }
@@ -217,6 +217,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.state = inputState
 				return m, nil
 			}
+			if m.state == selectState {
+				m.state = inputState
+				m.videoInfo = nil
+				m.qualityIndex = 0
+				return m, nil
+			}
+			if m.state == helpState {
+				m.state = inputState
+				return m, nil
+			}
 
 		case "p", "P":
 			if m.state == inputState {
@@ -224,6 +234,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if err == nil && text != "" {
 					m.textInput.SetValue(text)
 				}
+				return m, nil
+			}
+
+		case "f1":
+			if m.state == inputState {
+				m.state = helpState
 				return m, nil
 			}
 
@@ -256,15 +272,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch m.state {
 			case inputState:
 				url := strings.TrimSpace(m.textInput.Value())
-				if url == "" {
-					return m, nil
-				}
-				if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
-					m.err = fmt.Errorf("la URL debe comenzar con http:// o https://")
-					m.state = doneState
-					return m, nil
-				}
-				m.state = loadingState
+			if url == "" {
+				return m, nil
+			}
+			if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
+				m.inputError = fmt.Errorf("La URL debe comenzar con http:// o https://")
+				return m, nil
+			}
+			m.inputError = nil
+			m.state = loadingState
 				m.err = nil
 				return m, tea.Batch(fetchVideoInfo(url), m.spinner.Tick)
 
@@ -280,9 +296,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.dlCancel()
 					m.dlCancel = nil
 				}
+				if m.err != nil && m.videoInfo != nil {
+					m.state = selectState
+					m.err = nil
+					m.dlPercent = 0
+					m.dlSpeed = ""
+					m.dlETA = ""
+					return m, nil
+				}
 				m.textInput.SetValue("")
 				m.state = inputState
 				m.err = nil
+				m.inputError = nil
 				m.successMsg = ""
 				m.dlFilePath = ""
 				m.videoInfo = nil
@@ -305,6 +330,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if m.state == inputState {
+			m.inputError = nil
 			var cmd tea.Cmd
 			m.textInput, cmd = m.textInput.Update(msg)
 			return m, cmd
@@ -315,7 +341,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.state = doneState
 			m.err = msg.err
 		} else {
-			m.state = inputState
+			if ffmpegAvailable() {
+				m.state = inputState
+			} else {
+				m.state = downloadingBinState
+				m.downloadLabel = "ffmpeg"
+				m.startupFfmpegCheck = true
+				return m, tea.Batch(downloadFfmpegCmd(), m.spinner.Tick)
+			}
 		}
 		return m, nil
 
@@ -431,13 +464,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case ffmpegDownloadedMsg:
-		m.state = settingsState
-		if msg.Err != nil {
-			m.ffmpegStatusMsg = errorStyle.Render("Error: " + msg.Err.Error())
+		if m.startupFfmpegCheck {
+			m.startupFfmpegCheck = false
+			if msg.Err == nil {
+				m.ffmpegVersion = msg.Version
+				m.ffmpegStatus = "estático"
+			}
+			m.state = inputState
 		} else {
-			m.ffmpegVersion = msg.Version
-			m.ffmpegStatus = "estático"
-			m.ffmpegStatusMsg = successStyle.Render("ffmpeg instalado ✓")
+			m.state = settingsState
+			if msg.Err != nil {
+				m.ffmpegStatusMsg = errorStyle.Render("Error: " + msg.Err.Error())
+			} else {
+				m.ffmpegVersion = msg.Version
+				m.ffmpegStatus = "estático"
+				m.ffmpegStatusMsg = successStyle.Render("ffmpeg instalado ✓")
+			}
 		}
 		return m, nil
 	}
@@ -463,6 +505,8 @@ func (m model) View() string {
 		return m.doneView()
 	case settingsState:
 		return m.settingsView()
+	case helpState:
+		return m.helpView()
 	case checkingUpdateState:
 		return m.checkingUpdateView()
 	case updatingState:
@@ -472,15 +516,16 @@ func (m model) View() string {
 	}
 }
 
-func appHeader() string {
-	return titleStyle.Render(AppName)
+func (m model) appHeader() string {
+	return renderTitle(contentWidth(m.width))
 }
 
 func (m model) checkingView() string {
+	w := contentWidth(m.width)
 	var b strings.Builder
-	b.WriteString(appHeader())
+	b.WriteString(m.appHeader())
 	b.WriteString("\n\n")
-	b.WriteString(borderStyle.Render(
+	b.WriteString(renderBorder(w,
 		lipgloss.JoinVertical(lipgloss.Center,
 			m.spinner.View()+" Verificando yt-dlp...",
 		),
@@ -490,16 +535,21 @@ func (m model) checkingView() string {
 }
 
 func (m model) downloadingBinView() string {
+	w := contentWidth(m.width)
 	label := m.downloadLabel
 	if label == "" {
 		label = "yt-dlp " + m.selectedSource
 	}
+	msg := "Descargando " + label + "..."
+	if m.startupFfmpegCheck {
+		msg = "No se encontró ffmpeg, descargando..."
+	}
 	var b strings.Builder
-	b.WriteString(appHeader())
+	b.WriteString(m.appHeader())
 	b.WriteString("\n\n")
-	b.WriteString(borderStyle.Render(
+	b.WriteString(renderBorder(w,
 		lipgloss.JoinVertical(lipgloss.Center,
-			m.spinner.View()+" Descargando "+label+"...",
+			m.spinner.View()+" "+msg,
 		),
 	))
 	b.WriteString("\n")
@@ -507,25 +557,35 @@ func (m model) downloadingBinView() string {
 }
 
 func (m model) inputView() string {
+	w := contentWidth(m.width)
 	var b strings.Builder
-	b.WriteString(appHeader())
+	b.WriteString(m.appHeader())
 	b.WriteString("\n")
-	b.WriteString(subtitleStyle.Render("Descarga videos y audio desde YouTube, Instagram y más"))
+	b.WriteString(renderSubtitle(w, "Descarga videos y audio desde YouTube, Instagram y más"))
 	if existingCfg, _ := loadConfig(); existingCfg != "" {
 		b.WriteString("  ")
 		b.WriteString(versionStyle.Render("[" + existingCfg + "]"))
 	}
 	b.WriteString("\n\n")
-	b.WriteString(borderStyle.Render(
+	b.WriteString(renderBorder(w,
 		lipgloss.JoinVertical(lipgloss.Left,
 			"URL del video",
 			"",
 			m.textInput.View(),
 			"",
-			"📁 "+getDownloadsDir(),
+		),
+	))
+	if m.inputError != nil {
+		b.WriteString("\n")
+		b.WriteString(errorStyle.Render("  "+m.inputError.Error()))
+	}
+	b.WriteString("\n")
+	b.WriteString(renderBorder(w,
+		lipgloss.JoinVertical(lipgloss.Left,
+			"Dir: "+getDownloadsDir(),
 			"",
-			hintStyle.Render("Enter para analizar  ·  P para pegar"),
-			hintStyle.Render("C para configurar  ·  Ctrl+C para salir"),
+			renderHint(w, "Enter para analizar  ·  P para pegar"),
+			renderHint(w, "C para configurar  ·  F1 para ayuda  ·  Q o Ctrl+C para salir"),
 		),
 	))
 	b.WriteString("\n")
@@ -533,10 +593,11 @@ func (m model) inputView() string {
 }
 
 func (m model) loadingView() string {
+	w := contentWidth(m.width)
 	var b strings.Builder
-	b.WriteString(appHeader())
+	b.WriteString(m.appHeader())
 	b.WriteString("\n\n")
-	b.WriteString(borderStyle.Render(
+	b.WriteString(renderBorder(w,
 		lipgloss.JoinVertical(lipgloss.Center,
 			m.spinner.View()+" Analizando video...",
 		),
@@ -546,12 +607,13 @@ func (m model) loadingView() string {
 }
 
 func (m model) selectView() string {
+	w := contentWidth(m.width)
 	info := m.videoInfo
 	dur := formatDuration(int(math.Round(info.Duration)))
 
-	outputFormat := "🎬 formato original"
+	outputFormat := "Fmt: formato original"
 	if ffmpegAvailable() {
-		outputFormat = "🎬 MP4"
+		outputFormat = "Fmt: MP4"
 	}
 
 	infoBlock := lipgloss.JoinVertical(lipgloss.Left,
@@ -571,13 +633,16 @@ func (m model) selectView() string {
 	for i, q := range qualityPresets {
 		if i == firstAudio {
 			items = append(items, "")
-			items = append(items, subtitleStyle.Render("── Audio ──"))
+			items = append(items, renderSubtitle(w, "── Audio ──"))
 		}
 		if i == 0 && firstAudio > 0 {
-			items = append(items, subtitleStyle.Render("── Video ──"))
+			items = append(items, renderSubtitle(w, "── Video ──"))
 		}
 		if i == m.qualityIndex {
 			items = append(items, selectedStyle.Render("▸ "+q.Label))
+			if q.Description != "" {
+				items = append(items, unselectedStyle.Render("  "+q.Description))
+			}
 		} else {
 			items = append(items, unselectedStyle.Render("  "+q.Label))
 		}
@@ -591,26 +656,27 @@ func (m model) selectView() string {
 		"Seleccioná calidad (↑/↓):",
 		qualityBlock,
 		"",
-		hintStyle.Render("Enter para descargar  ·  Ctrl+C para salir"),
+		renderHint(w, "Enter para descargar  ·  Esc para volver  ·  Q o Ctrl+C para salir"),
 	)
 
 	var b strings.Builder
-	b.WriteString(appHeader())
+	b.WriteString(m.appHeader())
 	b.WriteString("\n\n")
-	b.WriteString(borderStyle.Render(content))
+	b.WriteString(renderBorder(w, content))
 	b.WriteString("\n")
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, b.String())
 }
 
 func (m model) downloadingView() string {
+	w := contentWidth(m.width)
 	info := ""
 	if m.dlSpeed != "" {
-		info += progressInfoStyle.Render("⬆️ "+formatSpeed(m.dlSpeed)) + "  "
+		info += progressInfoStyle.Render("↑ "+formatSpeed(m.dlSpeed)) + "  "
 	}
 	if !m.dlETAEndTime.IsZero() {
 		remaining := time.Until(m.dlETAEndTime)
 		if remaining > 0 {
-			info += progressInfoStyle.Render("⏱ " + formatDuration(int(remaining.Seconds())))
+			info += progressInfoStyle.Render("T: " + formatDuration(int(remaining.Seconds())))
 		}
 	}
 
@@ -619,36 +685,37 @@ func (m model) downloadingView() string {
 		bar := m.progress.ViewAs(m.dlPercent / 100)
 		pct := progressPercentStyle.Render(fmt.Sprintf("%.1f%%", m.dlPercent))
 		content = lipgloss.JoinVertical(lipgloss.Center,
-			"⬇️  Descargando...",
+			"↓ Descargando...",
 			"",
 			bar,
 			pct,
 			"",
 			info,
 			"",
-			hintStyle.Render("Ctrl+C para cancelar"),
+			renderHint(w, "Ctrl+C para cancelar"),
 		)
 	} else {
 		content = lipgloss.JoinVertical(lipgloss.Center,
-			"⏳ Preparando descarga...",
+			"... Preparando descarga...",
 			"",
 			m.spinner.View(),
 			"",
 			info,
 			"",
-			hintStyle.Render("Ctrl+C para cancelar"),
+			renderHint(w, "Ctrl+C para cancelar"),
 		)
 	}
 
 	var b strings.Builder
-	b.WriteString(appHeader())
+	b.WriteString(m.appHeader())
 	b.WriteString("\n\n")
-	b.WriteString(borderStyle.Render(content))
+	b.WriteString(renderBorder(w, content))
 	b.WriteString("\n")
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, b.String())
 }
 
 func (m model) doneView() string {
+	w := contentWidth(m.width)
 	var icon, title string
 	lines := []string{}
 	if m.err != nil {
@@ -657,91 +724,200 @@ func (m model) doneView() string {
 		lines = append(lines, icon+"  "+title, "")
 		lines = append(lines, m.err.Error())
 	} else {
-		icon = successStyle.Render("✅")
+		icon = successStyle.Render("✓")
 		title = successStyle.Render("Descarga completada")
 		lines = append(lines, icon+"  "+title, "")
 		if m.dlFilePath != "" {
-			lines = append(lines, "📁 "+m.dlFilePath)
+			lines = append(lines, m.dlFilePath)
 			lines = append(lines, "")
 		}
 	}
-	lines = append(lines, hintStyle.Render("Enter para continuar  ·  C para configurar  ·  Ctrl+C para salir"))
+	lines = append(lines, "")
+	if m.err != nil {
+		lines = append(lines, renderHint(w, "Enter para reintentar  ·  C para configurar  ·  Q o Ctrl+C para salir"))
+	} else {
+		lines = append(lines, renderHint(w, "Enter para continuar  ·  C para configurar  ·  Q o Ctrl+C para salir"))
+	}
 
 	content := lipgloss.JoinVertical(lipgloss.Left, lines...)
 
 	var b strings.Builder
-	b.WriteString(appHeader())
+	b.WriteString(m.appHeader())
 	b.WriteString("\n\n")
-	b.WriteString(borderStyle.Render(content))
+	b.WriteString(renderBorder(w, content))
 	b.WriteString("\n")
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, b.String())
 }
 
 func (m model) settingsView() string {
-	stableRadio := "  "
-	nightlyRadio := "  "
+	w := contentWidth(m.width)
+
+	stableRadio := "○"
+	nightlyRadio := "○"
 	if m.selectedSource == "stable" {
-		stableRadio = "◉ "
-	} else {
-		stableRadio = "○ "
+		stableRadio = "●"
 	}
 	if m.selectedSource == "nightly" {
-		nightlyRadio = "◉ "
-	} else {
-		nightlyRadio = "○ "
+		nightlyRadio = "●"
 	}
 
-	var lines []string
-	lines = append(lines, subtitleStyle.Render("── Configuración ──"))
-	lines = append(lines, "")
-	lines = append(lines, "📁 "+getDownloadsDir())
-	lines = append(lines, "")
-	lines = append(lines, settingsLabelStyle.Render("Fuente:"))
-	lines = append(lines, "  "+stableRadio+selectedStyle.Render("1. Stable"))
-	lines = append(lines, "  "+nightlyRadio+selectedStyle.Render("2. Nightly"))
-	lines = append(lines, "")
-	lines = append(lines, settingsLabelStyle.Render("yt-dlp:"))
+	// Sección Directorio
+	dirSection := renderBorder(w,
+		lipgloss.JoinVertical(lipgloss.Left,
+			"Dir: "+truncate(getDownloadsDir(), w-8),
+		),
+	)
+
+	// Sección Fuente
+	fuenteSection := renderBorder(w,
+		lipgloss.JoinVertical(lipgloss.Left,
+			settingsLabelStyle.Render("Fuente de yt-dlp:"),
+			"  "+stableRadio+" "+selectedStyle.Render("1. Stable"),
+			"  "+nightlyRadio+" "+selectedStyle.Render("2. Nightly"),
+		),
+	)
+
+	// Sección yt-dlp
+	var ytdlpStatus string
 	if m.updateVersionMsg != "" {
-		lines = append(lines, "  "+m.updateVersionMsg)
+		ytdlpStatus = truncate(m.updateVersionMsg, w-8)
+	} else if m.ytDlpVersion != "" {
+		ytdlpStatus = "✓ " + truncate(m.ytDlpVersion, w-8)
 	} else {
-		if m.ytDlpVersion != "" {
-			lines = append(lines, "  "+m.ytDlpVersion)
-		} else {
-			lines = append(lines, "  No instalado")
-		}
+		ytdlpStatus = "✗ No instalado"
 	}
-	lines = append(lines, "")
-	lines = append(lines, settingsLabelStyle.Render("ffmpeg:"))
+	ytdlpSection := renderBorder(w,
+		lipgloss.JoinVertical(lipgloss.Left,
+			settingsLabelStyle.Render("yt-dlp:"),
+			"  "+ytdlpStatus,
+		),
+	)
+
+	// Sección ffmpeg
+	var ffmpegStatus string
 	if m.ffmpegStatusMsg != "" {
-		lines = append(lines, "  "+m.ffmpegStatusMsg)
+		ffmpegStatus = truncate(m.ffmpegStatusMsg, w-8)
 	} else if m.ffmpegVersion != "" {
-		lines = append(lines, "  "+m.ffmpegVersion+" ("+m.ffmpegStatus+")")
+		ffmpegStatus = "✓ " + truncate(m.ffmpegVersion+" ("+m.ffmpegStatus+")", w-8)
 	} else {
-		lines = append(lines, "  No encontrado")
+		ffmpegStatus = "✗ No encontrado"
 	}
-	lines = append(lines, "")
+	ffmpegSection := renderBorder(w,
+		lipgloss.JoinVertical(lipgloss.Left,
+			settingsLabelStyle.Render("ffmpeg:"),
+			"  "+ffmpegStatus,
+		),
+	)
+
+	// Hints
 	hints := "1/2: fuente  ·  U: actualizar yt-dlp"
 	if m.ffmpegStatus != "sistema" {
 		hints += "  ·  F: descargar ffmpeg"
 	}
-	lines = append(lines, hintStyle.Render(hints))
-	lines = append(lines, hintStyle.Render("C o Esc: volver  ·  Ctrl+C: salir"))
-
-	content := lipgloss.JoinVertical(lipgloss.Center, lines...)
 
 	var b strings.Builder
-	b.WriteString(appHeader())
+	b.WriteString(m.appHeader())
 	b.WriteString("\n\n")
-	b.WriteString(borderStyle.Render(content))
+	b.WriteString(dirSection)
+	b.WriteString("\n")
+	b.WriteString(fuenteSection)
+	b.WriteString("\n")
+	b.WriteString(ytdlpSection)
+	b.WriteString("\n")
+	b.WriteString(ffmpegSection)
+	b.WriteString("\n")
+	b.WriteString(renderHint(w, hints))
+	b.WriteString("\n")
+	b.WriteString(renderHint(w, "C o Esc: volver  ·  Q o Ctrl+C: salir"))
+	b.WriteString("\n")
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, b.String())
+}
+
+func (m model) helpView() string {
+	w := contentWidth(m.width)
+
+	// Sección qué es DLP-Go
+	dlpgoSection := renderBorder(w,
+		lipgloss.JoinVertical(lipgloss.Left,
+			settingsLabelStyle.Render("¿Qué es DLP-Go?"),
+			"",
+			"  Un cliente gráfico para descargar videos y",
+			"  audio desde YouTube, Instagram y otras",
+			"  plataformas. Usa yt-dlp y ffmpeg por debajo.",
+		),
+	)
+
+	// Sección qué es yt-dlp
+	ytdlpSection := renderBorder(w,
+		lipgloss.JoinVertical(lipgloss.Left,
+			settingsLabelStyle.Render("¿Qué es yt-dlp?"),
+			"",
+			"  yt-dlp es una herramienta de línea de comandos",
+			"  para descargar videos de internet. Soporta",
+			"  miles de sitios web y múltiples formatos.",
+			"",
+			"  Sitios soportados:",
+			"  github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md",
+		),
+	)
+
+	// Sección qué es ffmpeg
+	ffmpegSection := renderBorder(w,
+		lipgloss.JoinVertical(lipgloss.Left,
+			settingsLabelStyle.Render("¿Qué es ffmpeg?"),
+			"",
+			"  ffmpeg convierte y edita archivos multimedia.",
+			"  Se usa para unir video + audio en un solo",
+			"  archivo, cambiar formatos y más.",
+		),
+	)
+
+	// Sección cómo se usa
+	usageSection := renderBorder(w,
+		lipgloss.JoinVertical(lipgloss.Left,
+			settingsLabelStyle.Render("¿Cómo se usa?"),
+			"",
+			"  1. Copia la URL del video y presiona P para pegar",
+			"  2. Presiona Enter para analizar",
+			"  3. Elige la calidad o formato deseado",
+			"  4. Espera a que termine la descarga",
+			"  5. Los archivos se guardan en: Descargas/",
+		),
+	)
+
+	// Sección contacto
+	contactSection := renderBorder(w,
+		lipgloss.JoinVertical(lipgloss.Left,
+			settingsLabelStyle.Render("Contacto y soporte"),
+			"",
+			"  github.com/FerBS3/app-yt-dlp-go",
+		),
+	)
+
+	var b strings.Builder
+	b.WriteString(m.appHeader())
+	b.WriteString("\n\n")
+	b.WriteString(dlpgoSection)
+	b.WriteString("\n")
+	b.WriteString(ytdlpSection)
+	b.WriteString("\n")
+	b.WriteString(ffmpegSection)
+	b.WriteString("\n")
+	b.WriteString(usageSection)
+	b.WriteString("\n")
+	b.WriteString(contactSection)
+	b.WriteString("\n")
+	b.WriteString(renderHint(w, "Esc: volver  ·  Q o Ctrl+C: salir"))
 	b.WriteString("\n")
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, b.String())
 }
 
 func (m model) checkingUpdateView() string {
+	w := contentWidth(m.width)
 	var b strings.Builder
-	b.WriteString(appHeader())
+	b.WriteString(m.appHeader())
 	b.WriteString("\n\n")
-	b.WriteString(borderStyle.Render(
+	b.WriteString(renderBorder(w,
 		lipgloss.JoinVertical(lipgloss.Center,
 			m.spinner.View()+" Buscando actualizaciones...",
 		),
@@ -751,10 +927,11 @@ func (m model) checkingUpdateView() string {
 }
 
 func (m model) updatingView() string {
+	w := contentWidth(m.width)
 	var b strings.Builder
-	b.WriteString(appHeader())
+	b.WriteString(m.appHeader())
 	b.WriteString("\n\n")
-	b.WriteString(borderStyle.Render(
+	b.WriteString(renderBorder(w,
 		lipgloss.JoinVertical(lipgloss.Center,
 			m.spinner.View()+" Actualizando yt-dlp...",
 		),
@@ -804,4 +981,31 @@ func truncate(s string, max int) string {
 		return s
 	}
 	return s[:max-3] + "..."
+}
+
+func contentWidth(windowWidth int) int {
+	w := windowWidth - 16
+	if w > 72 {
+		w = 72
+	}
+	if w < 40 {
+		w = 40
+	}
+	return w
+}
+
+func renderTitle(width int) string {
+	return titleStyle.Width(width).Render(AppName)
+}
+
+func renderSubtitle(width int, text string) string {
+	return subtitleStyle.Width(width).Render(text)
+}
+
+func renderHint(width int, text string) string {
+	return hintStyle.Width(width).Render(text)
+}
+
+func renderBorder(width int, content string) string {
+	return borderStyle.Width(width - 4).Render(content)
 }
