@@ -1,6 +1,8 @@
 # Binario compilado de la aplicacion
 yt-dlp-go-prueba
 yt-dlp-go-prueba.exe
+DLP-Go
+DLP-Go.exe
 
 # Releases empaquetadas
 release/
@@ -15,6 +17,11 @@ yt-dlp/ffmpeg/
 
 # Videos descargados
 Descargas/
+
+# Parciales de descarga y logs
+*.part
+*.ytdl
+*.log
 
 # Archivos objeto de Go
 *.o
@@ -37,3 +44,14 @@ vendor/
 # Archivos de compilacion temporal
 /tmp
 /build
+
+# Entorno de desarrollo local
+.agents/
+skills-lock.json
+
+# Editores y sistema operativo
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
