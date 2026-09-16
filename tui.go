@@ -118,6 +118,8 @@ type model struct {
 	dlChan   chan tea.Msg
 	dlCancel context.CancelFunc
 
+	loadCancel context.CancelFunc
+
 	videoInfo *VideoInfo
 
 	err        error
@@ -217,6 +219,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.state = inputState
 				return m, nil
 			}
+			if m.state == loadingState {
+				if m.loadCancel != nil {
+					m.loadCancel()
+					m.loadCancel = nil
+				}
+				m.state = inputState
+				return m, nil
+			}
 			if m.state == selectState {
 				m.state = inputState
 				m.videoInfo = nil
@@ -282,7 +292,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.inputError = nil
 			m.state = loadingState
 				m.err = nil
-				return m, tea.Batch(fetchVideoInfo(url), m.spinner.Tick)
+				ctx, cancel := context.WithCancel(context.Background())
+				m.loadCancel = cancel
+				return m, tea.Batch(fetchVideoInfo(ctx, url), m.spinner.Tick)
 
 			case selectState:
 				m.state = downloadingState
@@ -358,6 +370,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(downloadYtDlp(msg.targetPath, msg.source), m.spinner.Tick)
 
 	case videoInfoMsg:
+		if m.loadCancel != nil {
+			m.loadCancel()
+			m.loadCancel = nil
+		}
+		if m.state != loadingState {
+			return m, nil
+		}
 		if msg.Err != nil {
 			m.state = doneState
 			m.err = msg.Err
@@ -375,10 +394,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.dlPercent = msg.Percent
 		m.dlSpeed = msg.Speed
 		m.dlETA = msg.ETA
-		if msg.ETA != "" && msg.ETA != "NA" {
-			if s, err := strconv.Atoi(msg.ETA); err == nil {
-				m.dlETAEndTime = time.Now().Add(time.Duration(s) * time.Second)
-			}
+		if s, ok := parseETA(msg.ETA); ok {
+			m.dlETAEndTime = time.Now().Add(time.Duration(s) * time.Second)
 		} else {
 			m.dlETAEndTime = time.Time{}
 		}
@@ -600,6 +617,8 @@ func (m model) loadingView() string {
 	b.WriteString(renderBorder(w,
 		lipgloss.JoinVertical(lipgloss.Center,
 			m.spinner.View()+" Analizando video...",
+			"",
+			renderHint(w, "Esc para cancelar"),
 		),
 	))
 	b.WriteString("\n")
@@ -678,6 +697,8 @@ func (m model) downloadingView() string {
 		if remaining > 0 {
 			info += progressInfoStyle.Render("T: " + formatDuration(int(remaining.Seconds())))
 		}
+	} else if isValidRawETA(m.dlETA) {
+		info += progressInfoStyle.Render("T: " + strings.TrimSpace(m.dlETA))
 	}
 
 	var content string
@@ -974,6 +995,38 @@ func formatDuration(seconds int) string {
 		return fmt.Sprintf("%d:%02d:%02d", h, m, s)
 	}
 	return fmt.Sprintf("%d:%02d", m, s)
+}
+
+func parseETA(s string) (int, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" || s == "NA" || s == "None" || s == "null" {
+		return 0, false
+	}
+	if v, err := strconv.Atoi(s); err == nil && v >= 0 {
+		return v, true
+	}
+	if f, err := strconv.ParseFloat(s, 64); err == nil && f >= 0 {
+		return int(f), true
+	}
+	parts := strings.Split(s, ":")
+	if len(parts) == 2 || len(parts) == 3 {
+		total := 0
+		for _, part := range parts {
+			part = strings.TrimSpace(part)
+			v, err := strconv.Atoi(part)
+			if err != nil || v < 0 {
+				return 0, false
+			}
+			total = total*60 + v
+		}
+		return total, true
+	}
+	return 0, false
+}
+
+func isValidRawETA(s string) bool {
+	s = strings.TrimSpace(s)
+	return s != "" && s != "NA" && s != "None" && s != "null"
 }
 
 func truncate(s string, max int) string {
