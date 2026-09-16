@@ -23,13 +23,17 @@ func startDownload(ctx context.Context, url, outputDir string, preset QualityPre
 
 		format := preset.Format
 		if !preset.AudioOnly && !ffmpegAvailable() {
-			if idx := strings.LastIndex(format, "/"); idx >= 0 {
-				format = format[idx+1:]
+			for _, seg := range strings.Split(format, "/") {
+				if !strings.Contains(seg, "+") {
+					format = strings.TrimSpace(seg)
+					break
+				}
 			}
 		}
 
 		args := []string{
 			"--newline",
+			"--socket-timeout", "30",
 			"--progress-template",
 			`{"percent":"%(progress.percent)s","speed":"%(progress.speed)s","eta":"%(progress.eta)s"}`,
 			"-f", format,
@@ -45,7 +49,14 @@ func startDownload(ctx context.Context, url, outputDir string, preset QualityPre
 			}
 		}
 
-		args = append(args, "--print", "after_move:filepath")
+		pathFile, err := os.CreateTemp("", "dlpgo-filepath-*.txt")
+		if err != nil {
+			return downloadDoneMsg{Err: fmt.Errorf("error al crear archivo temporal: %w", err)}
+		}
+		pathFile.Close()
+		pathFileName := pathFile.Name()
+
+		args = append(args, "--print-to-file", "after_move:filepath", pathFileName)
 		args = append(args, url)
 
 		cmd := exec.CommandContext(ctx, ytDlpBin, args...)
@@ -67,46 +78,67 @@ func startDownload(ctx context.Context, url, outputDir string, preset QualityPre
 		go func() {
 			defer close(ch)
 
-			var errBuf strings.Builder
-			stderrDone := make(chan struct{})
-			go func() {
-				defer close(stderrDone)
-				scanner := bufio.NewScanner(stderr)
-				for scanner.Scan() {
-					line := strings.TrimSpace(scanner.Text())
-					var p progressData
-					if json.Unmarshal([]byte(line), &p) == nil {
-						percent := 0.0
-						if p.Percent != "" {
-							fmt.Sscanf(strings.TrimSuffix(p.Percent, "%"), "%f", &percent)
-						}
-						select {
-						case ch <- progressMsg{Percent: percent, Speed: p.Speed, ETA: p.ETA}:
-						case <-ctx.Done():
-							return
-						}
-						continue
-					}
-					errBuf.WriteString(line + "\n")
-				}
-			}()
+		sendProgress := func(p progressData) bool {
+			percent := 0.0
+			if p.Percent != "" {
+				fmt.Sscanf(strings.TrimSuffix(p.Percent, "%"), "%f", &percent)
+			}
+			select {
+			case ch <- progressMsg{Percent: percent, Speed: p.Speed, ETA: p.ETA}:
+				return true
+			case <-ctx.Done():
+				return false
+			}
+		}
 
-			var lastOutputPath string
-			stdoutDone := make(chan struct{})
-			go func() {
-				defer close(stdoutDone)
-				scanner := bufio.NewScanner(stdout)
-				for scanner.Scan() {
-					line := strings.TrimSpace(scanner.Text())
-					if line != "" {
-						lastOutputPath = line
+		var errBuf strings.Builder
+		stderrDone := make(chan struct{})
+		go func() {
+			defer close(stderrDone)
+			scanner := bufio.NewScanner(stderr)
+			for scanner.Scan() {
+				line := strings.TrimSpace(scanner.Text())
+				var p progressData
+				if json.Unmarshal([]byte(line), &p) == nil {
+					if !sendProgress(p) {
+						return
 					}
+					continue
 				}
-			}()
+				errBuf.WriteString(line + "\n")
+			}
+		}()
 
-			err := cmd.Wait()
-			<-stderrDone
-			<-stdoutDone
+		var lastOutputPath string
+		stdoutDone := make(chan struct{})
+		go func() {
+			defer close(stdoutDone)
+			scanner := bufio.NewScanner(stdout)
+			for scanner.Scan() {
+				line := strings.TrimSpace(scanner.Text())
+				var p progressData
+				if json.Unmarshal([]byte(line), &p) == nil {
+					if !sendProgress(p) {
+						return
+					}
+					continue
+				}
+				if line != "" {
+					lastOutputPath = line
+				}
+			}
+		}()
+
+		err := cmd.Wait()
+		<-stderrDone
+		<-stdoutDone
+
+		if data, readErr := os.ReadFile(pathFileName); readErr == nil {
+			if p := strings.TrimSpace(string(data)); p != "" {
+				lastOutputPath = p
+			}
+		}
+		os.Remove(pathFileName)
 
 			if ctx.Err() != nil {
 				select {
