@@ -8,10 +8,44 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
+
+func progressPercent(p progressData) float64 {
+	clamp := func(f float64) float64 {
+		if f < 0 {
+			return 0
+		}
+		if f > 100 {
+			return 100
+		}
+		return f
+	}
+	if s := strings.TrimSpace(p.Percent); s != "" {
+		var f float64
+		if _, err := fmt.Sscanf(strings.TrimSuffix(s, "%"), "%f", &f); err == nil {
+			return clamp(f)
+		}
+	}
+	total := strings.TrimSpace(p.Total)
+	if total == "" || total == "NA" {
+		total = strings.TrimSpace(p.TotalEst)
+	}
+	if d, err1 := strconv.ParseFloat(strings.TrimSpace(p.Downloaded), 64); err1 == nil {
+		if t, err2 := strconv.ParseFloat(total, 64); err2 == nil && t > 0 && d >= 0 {
+			return clamp(d / t * 100)
+		}
+	}
+	if i, err1 := strconv.ParseFloat(strings.TrimSpace(p.FragIdx), 64); err1 == nil {
+		if n, err2 := strconv.ParseFloat(strings.TrimSpace(p.FragTotal), 64); err2 == nil && n > 0 && i >= 0 {
+			return clamp(i / n * 100)
+		}
+	}
+	return 0
+}
 
 func startDownload(ctx context.Context, url, outputDir string, preset QualityPreset) tea.Cmd {
 	return func() tea.Msg {
@@ -35,7 +69,7 @@ func startDownload(ctx context.Context, url, outputDir string, preset QualityPre
 			"--newline",
 			"--socket-timeout", "30",
 			"--progress-template",
-			`{"percent":"%(progress.percent)s","speed":"%(progress.speed)s","eta":"%(progress.eta)s"}`,
+			`{"percent":"%(progress.percent)s","speed":"%(progress.speed)s","eta":"%(progress.eta)s","dl":"%(progress.downloaded_bytes)s","total":"%(progress.total_bytes)s","totalest":"%(progress.total_bytes_estimate)s","fi":"%(progress.fragment_index)s","fn":"%(progress.fragment_count)s"}`,
 			"-f", format,
 			"-o", filepath.Join(outputDir, "%(title)s.%(ext)s"),
 		}
@@ -79,12 +113,8 @@ func startDownload(ctx context.Context, url, outputDir string, preset QualityPre
 			defer close(ch)
 
 		sendProgress := func(p progressData) bool {
-			percent := 0.0
-			if p.Percent != "" {
-				fmt.Sscanf(strings.TrimSuffix(p.Percent, "%"), "%f", &percent)
-			}
 			select {
-			case ch <- progressMsg{Percent: percent, Speed: p.Speed, ETA: p.ETA}:
+			case ch <- progressMsg{Percent: progressPercent(p), Speed: p.Speed, ETA: p.ETA}:
 				return true
 			case <-ctx.Done():
 				return false

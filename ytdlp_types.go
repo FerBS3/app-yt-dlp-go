@@ -49,9 +49,14 @@ var ytDlpBin string
 var selectedSource = "nightly"
 
 type progressData struct {
-	Percent string `json:"percent"`
-	Speed   string `json:"speed"`
-	ETA     string `json:"eta"`
+	Percent    string `json:"percent"`
+	Speed      string `json:"speed"`
+	ETA        string `json:"eta"`
+	Downloaded string `json:"dl"`
+	Total      string `json:"total"`
+	TotalEst   string `json:"totalest"`
+	FragIdx    string `json:"fi"`
+	FragTotal  string `json:"fn"`
 }
 
 type progressMsg struct {
