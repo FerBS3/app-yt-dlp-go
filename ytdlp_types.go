@@ -2,6 +2,7 @@ package main
 
 import (
 	"archive/zip"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -35,9 +36,9 @@ type QualityPreset struct {
 const AppName = "DLP Go"
 
 var qualityPresets = []QualityPreset{
-	{Label: "Mejor calidad (1080p)", Format: "bestvideo[height<=1080]+bestaudio/best[height<=1080]", Description: "Full HD, ideal para pantallas grandes"},
-	{Label: "720p", Format: "bestvideo[height<=720]+bestaudio/best[height<=720]", Description: "HD, buen balance calidad/tamaño"},
-	{Label: "480p", Format: "bestvideo[height<=480]+bestaudio/best[height<=480]", Description: "SD, archivos más livianos"},
+	{Label: "Mejor calidad (1080p)", Format: "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best", Description: "Full HD, ideal para pantallas grandes"},
+	{Label: "720p", Format: "bestvideo[height<=720]+bestaudio/best[height<=720]/best", Description: "HD, buen balance calidad/tamaño"},
+	{Label: "480p", Format: "bestvideo[height<=480]+bestaudio/best[height<=480]/best", Description: "SD, archivos más livianos"},
 	{Label: "Mejor calidad", Format: "bestvideo+bestaudio/best", Description: "Sin límite de resolución"},
 	{Label: "Audio AAC (m4a)", Format: "bestaudio[ext=m4a]/bestaudio", AudioOnly: true, Description: "AAC 128kbps, compatible con todo"},
 	{Label: "Audio Opus", Format: "bestaudio[ext=opus]/bestaudio", AudioOnly: true, Description: "Opus, mejor calidad/bitrate"},
@@ -95,11 +96,19 @@ type updateCompletedMsg struct {
 	err error
 }
 
-func fetchVideoInfo(url string) tea.Cmd {
+func fetchVideoInfo(ctx context.Context, url string) tea.Cmd {
 	return func() tea.Msg {
-		cmd := exec.Command(ytDlpBin, "--dump-json", "--no-download", url)
+		ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, ytDlpBin, "--dump-json", "--no-download", url)
 		output, err := cmd.Output()
 		if err != nil {
+			if ctx.Err() == context.DeadlineExceeded {
+				return videoInfoMsg{Err: fmt.Errorf("tiempo agotado analizando el video (60s). Probá actualizar yt-dlp con la tecla U en configuración")}
+			}
+			if ctx.Err() == context.Canceled {
+				return videoInfoMsg{Err: fmt.Errorf("análisis cancelado")}
+			}
 			var exitErr *exec.ExitError
 			msg := fmt.Sprintf("yt-dlp: %s", err)
 			if errors.As(err, &exitErr) && len(exitErr.Stderr) > 0 {
@@ -238,7 +247,8 @@ func getLatestReleaseVersion(source string) (string, error) {
 }
 
 func downloadFile(url, dest string) error {
-	resp, err := http.Get(url)
+	client := &http.Client{Timeout: 15 * time.Minute}
+	resp, err := client.Get(url)
 	if err != nil {
 		return fmt.Errorf("no se pudo descargar: %w", err)
 	}
